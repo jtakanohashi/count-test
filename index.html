@@ -89,29 +89,35 @@
             render();
         }
 
-        // ★★★ 汎用的なスコア更新関数に統合 ★★★
-        // ゲーム数・得点どちらもこの関数を oninput で呼び出す
+        // ★★★ スクロール位置を保持するよう修正 ★★★
         function updateMatchScore(matchId, field, value) {
             if (state.isFinalized) return;
             const match = state.matches.find(m => m.id === matchId);
             if (!match) return;
 
             match[field] = value === "" ? "" : Math.max(0, parseInt(value) || 0);
-            match.forfeitPlayerIndex = null; // スコア入力があったら棄権は解除
+            match.forfeitPlayerIndex = null;
 
-            // ゲーム数が入力された場合のみ、完了状態を判定
             if (field === 'p1Sets' || field === 'p2Sets') {
                 const wasFinished = match.finished;
                 match.finished = (match.p1Sets !== "" && match.p2Sets !== "");
-                // 完了状態が変化した場合のみ再描画
+                
                 if (wasFinished !== match.finished) {
                     saveState();
+                    
+                    // 1. 再描画前のスクロール位置を記憶
+                    const scrollY = window.scrollY;
+                    
+                    // 2. 再描画
                     render();
+                    
+                    // 3. 記憶した位置にスクロールを戻す
+                    window.scrollTo(0, scrollY);
                     return;
                 }
             }
             
-            saveState(); // データのみ保存し、UIは更新しない
+            saveState();
         }
 
         function setForfeit(matchId, playerIndex) {
@@ -215,13 +221,11 @@
             });
         }
 
-        // --- UIレンダリング ---
-
+        // --- UIレンダリング (変更なし) ---
         function render() {
             const container = document.getElementById('app');
             
             if (state.isSetup) {
-                // (セットアップ画面は変更なし)
                 container.innerHTML = `
                     <div class="max-w-md mx-auto pt-10">
                         <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
@@ -268,7 +272,6 @@
                         </button>
                     </header>
 
-                    <!-- 順位表 -->
                     <div class="bg-white rounded-xl shadow-md border ${state.isFinalized ? 'border-yellow-400 ring-2 ring-yellow-100' : 'border-slate-200'} overflow-hidden mb-8">
                         <div class="overflow-x-auto">
                             <table class="w-full text-sm text-left">
