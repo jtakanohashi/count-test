@@ -7,31 +7,47 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap' );
         body { font-family: 'Inter', sans-serif; }
         input[type="number"]::-webkit-inner-spin-button,
         input[type="number"]::-webkit-outer-spin-button {
             -webkit-appearance: none;
             margin: 0;
         }
+        @keyframes bounce-in {
+            0% { opacity: 0; transform: translateY(20px) scale(0.95); }
+            100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .animate-bounce-in { animation: bounce-in 0.5s ease-out forwards; }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800">
-    <div id="app" class="max-w-2xl mx-auto p-4 pb-24">
+    <div id="app" class="max-w-2xl mx-auto p-4 pb-32">
         <!-- コンテンツはJavaScriptで動的に生成されます -->
     </div>
 
     <script>
-        // 状態管理
-        let state = {
-            players: ["選手A", "選手B", "選手C", "選手D"],
-            isSetup: true,
-            matches: [],
-            isFinalized: false
-        };
+        let state;
 
-        // 初期化
+        function saveState() {
+            localStorage.setItem('pingpongLeagueState', JSON.stringify(state));
+        }
+
+        function loadState() {
+            const savedState = localStorage.getItem('pingpongLeagueState');
+            if (savedState) {
+                return JSON.parse(savedState);
+            }
+            return {
+                players: ["選手A", "選手B", "選手C", "選手D"],
+                isSetup: true,
+                matches: [],
+                isFinalized: false
+            };
+        }
+
         function init() {
+            state = loadState();
             render();
         }
 
@@ -39,18 +55,21 @@
 
         function addPlayer() {
             state.players.push(`選手${state.players.length + 1}`);
+            saveState();
             render();
         }
 
         function removePlayer(index) {
             if (state.players.length > 2) {
                 state.players.splice(index, 1);
+                saveState();
                 render();
             }
         }
 
         function updatePlayerName(index, name) {
             state.players[index] = name;
+            saveState();
         }
 
         function startLeague() {
@@ -66,12 +85,14 @@
                         p2Sets: "",
                         p1Points: "",
                         p2Points: "",
-                        finished: false
+                        finished: false,
+                        forfeitPlayerIndex: null // 棄権者情報を追加
                     });
                 }
             }
             state.isSetup = false;
             state.isFinalized = false;
+            saveState();
             render();
         }
 
@@ -80,49 +101,110 @@
             const match = state.matches.find(m => m.id === matchId);
             if (!match) return;
 
-            // 負の数を禁止
             let updatedValue = value === "" ? "" : Math.max(0, parseInt(value) || 0);
             match[field] = updatedValue;
+            match.forfeitPlayerIndex = null; // スコア入力時は棄権を解除
 
-            // 完了判定
-            if (field === 'p1Sets' || field === 'p2Sets') {
-                match.finished = (match.p1Sets !== "" && match.p2Sets !== "");
+            match.finished = (match.p1Sets !== "" && match.p2Sets !== "");
+            
+            saveState();
+            render();
+        }
+
+        // ★棄権を処理する新しい関数
+        function setForfeit(matchId, playerIndex) {
+            if (state.isFinalized) return;
+            const match = state.matches.find(m => m.id === matchId);
+            if (!match) return;
+
+            // 同じボタンを再度クリックしたら棄権を解除
+            if (match.forfeitPlayerIndex === playerIndex) {
+                match.forfeitPlayerIndex = null;
+                match.finished = false;
+            } else {
+                match.forfeitPlayerIndex = playerIndex;
+                match.finished = true;
+                // 棄権時はスコアをクリア
+                match.p1Sets = "";
+                match.p2Sets = "";
+                match.p1Points = "";
+                match.p2Points = "";
             }
+            
+            saveState();
             render();
         }
 
         function finalizeResults() {
             state.isFinalized = true;
+            saveState();
             render();
         }
 
         function resetApp() {
-            state.isSetup = true;
-            state.matches = [];
-            state.isFinalized = false;
+            localStorage.removeItem('pingpongLeagueState');
+            state = loadState();
             render();
         }
 
         // --- 計算ロジック ---
 
+        // ★棄権を考慮するように修正
+        function calculateSubStats(playerIndex, tiedPlayerIndices) {
+            const subStats = { matchesWon: 0, setsWon: 0, setsLost: 0, pointsWon: 0, pointsLost: 0 };
+
+            state.matches.forEach(m => {
+                if (!m.finished || !tiedPlayerIndices.includes(m.p1Index) || !tiedPlayerIndices.includes(m.p2Index)) return;
+
+                // 棄権試合の場合
+                if (m.forfeitPlayerIndex !== null) {
+                    if (m.p1Index === playerIndex && m.forfeitPlayerIndex === m.p2Index) subStats.matchesWon++;
+                    if (m.p2Index === playerIndex && m.forfeitPlayerIndex === m.p1Index) subStats.matchesWon++;
+                    return; // 棄権試合はセット・ポイント率の計算に含めない
+                }
+
+                const p1s = Number(m.p1Sets), p2s = Number(m.p2Sets);
+                const p1p = Number(m.p1Points), p2p = Number(m.p2Points);
+
+                if (m.p1Index === playerIndex) {
+                    if (p1s > p2s) subStats.matchesWon++;
+                    subStats.setsWon += p1s; subStats.setsLost += p2s;
+                    subStats.pointsWon += p1p; subStats.pointsLost += p2p;
+                } else if (m.p2Index === playerIndex) {
+                    if (p2s > p1s) subStats.matchesWon++;
+                    subStats.setsWon += p2s; subStats.setsLost += p1s;
+                    subStats.pointsWon += p2p; subStats.pointsLost += p1p;
+                }
+            });
+
+            subStats.setRatio = subStats.setsLost === 0 ? (subStats.setsWon > 0 ? 9999 : 0) : subStats.setsWon / subStats.setsLost;
+            subStats.pointRatio = subStats.pointsLost === 0 ? (subStats.pointsWon > 0 ? 9999 : 0) : subStats.pointsWon / subStats.pointsLost;
+            return subStats;
+        }
+
+        // ★棄権を考慮するように修正
         function calculateStandings() {
             const stats = state.players.map((name, index) => ({
-                index,
-                name,
-                matchesWon: 0,
-                matchesLost: 0,
-                setsWon: 0,
-                setsLost: 0,
-                pointsWon: 0,
-                pointsLost: 0
+                index, name, matchesWon: 0, matchesLost: 0, setsWon: 0, setsLost: 0, pointsWon: 0, pointsLost: 0
             }));
 
             state.matches.forEach(m => {
                 if (!m.finished) return;
-                const p1s = Number(m.p1Sets);
-                const p2s = Number(m.p2Sets);
-                const p1p = Number(m.p1Points);
-                const p2p = Number(m.p2Points);
+
+                // 棄権試合の処理
+                if (m.forfeitPlayerIndex !== null) {
+                    if (m.forfeitPlayerIndex === m.p1Index) {
+                        stats[m.p1Index].matchesLost++;
+                        stats[m.p2Index].matchesWon++;
+                    } else {
+                        stats[m.p2Index].matchesLost++;
+                        stats[m.p1Index].matchesWon++;
+                    }
+                    return; // 棄権試合はセット・ポイントの加算を行わない
+                }
+
+                const p1s = Number(m.p1Sets), p2s = Number(m.p2Sets);
+                const p1p = Number(m.p1Points), p2p = Number(m.p2Points);
 
                 if (p1s > p2s) {
                     stats[m.p1Index].matchesWon++;
@@ -131,14 +213,10 @@
                     stats[m.p2Index].matchesWon++;
                     stats[m.p1Index].matchesLost++;
                 }
-                stats[m.p1Index].setsWon += p1s;
-                stats[m.p1Index].setsLost += p2s;
-                stats[m.p2Index].setsWon += p2s;
-                stats[m.p2Index].setsLost += p1s;
-                stats[m.p1Index].pointsWon += p1p;
-                stats[m.p1Index].pointsLost += p2p;
-                stats[m.p2Index].pointsWon += p2p;
-                stats[m.p2Index].pointsLost += p1p;
+                stats[m.p1Index].setsWon += p1s; stats[m.p1Index].setsLost += p2s;
+                stats[m.p2Index].setsWon += p2s; stats[m.p2Index].setsLost += p1s;
+                stats[m.p1Index].pointsWon += p1p; stats[m.p1Index].pointsLost += p2p;
+                stats[m.p2Index].pointsWon += p2p; stats[m.p2Index].pointsLost += p1p;
             });
 
             stats.forEach(s => {
@@ -147,27 +225,17 @@
             });
 
             return stats.sort((a, b) => {
-                // 1. 勝数
                 if (b.matchesWon !== a.matchesWon) return b.matchesWon - a.matchesWon;
-
-                // 2. 直接対決 (2名同率時)
                 const tiedPlayers = stats.filter(s => s.matchesWon === a.matchesWon);
-                if (tiedPlayers.length === 2) {
-                    const h2h = state.matches.find(m => 
-                        (m.p1Index === a.index && m.p2Index === b.index) || 
-                        (m.p1Index === b.index && m.p2Index === a.index)
-                    );
-                    if (h2h && h2h.finished) {
-                        const p1s = Number(h2h.p1Sets);
-                        const p2s = Number(h2h.p2Sets);
-                        const aWon = (h2h.p1Index === a.index && p1s > p2s) || (h2h.p2Index === a.index && p2s > p1s);
-                        return aWon ? -1 : 1;
-                    }
+                if (tiedPlayers.length > 1) {
+                    const tiedPlayerIndices = tiedPlayers.map(p => p.index);
+                    const subStatsA = calculateSubStats(a.index, tiedPlayerIndices);
+                    const subStatsB = calculateSubStats(b.index, tiedPlayerIndices);
+                    if (subStatsB.matchesWon !== subStatsA.matchesWon) return subStatsB.matchesWon - subStatsA.matchesWon;
+                    if (subStatsB.setRatio !== subStatsA.setRatio) return subStatsB.setRatio - subStatsA.setRatio;
+                    if (subStatsB.pointRatio !== subStatsA.pointRatio) return subStatsB.pointRatio - subStatsA.pointRatio;
                 }
-
-                // 3. セット率
                 if (b.setRatio !== a.setRatio) return b.setRatio - a.setRatio;
-                // 4. ポイント率
                 return b.pointRatio - a.pointRatio;
             });
         }
@@ -178,6 +246,7 @@
             const container = document.getElementById('app');
             
             if (state.isSetup) {
+                // (セットアップ画面のHTMLは変更なしのため省略)
                 container.innerHTML = `
                     <div class="max-w-md mx-auto pt-10">
                         <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
@@ -185,19 +254,14 @@
                                 <i data-lucide="trophy" class="text-yellow-500"></i>
                                 卓球リーグ戦作成
                             </h1>
-                            <p class="text-slate-500 text-sm mb-6 text-center">同率2名の際は直接対決を優先します。</p>
-                            
+                            <p class="text-slate-500 text-sm mb-6 text-center">同率の場合は当該選手間の成績で順位を決定します。</p>
                             <div class="space-y-3 mb-6">
                                 ${state.players.map((p, i) => `
                                     <div class="flex gap-2 items-center">
                                         <span class="w-6 text-slate-400 font-bold">${i + 1}.</span>
-                                        <input 
-                                            type="text" 
-                                            value="${p}" 
-                                            oninput="updatePlayerName(${i}, this.value)"
+                                        <input type="text" value="${p}" onchange="updatePlayerName(${i}, this.value)"
                                             class="flex-1 border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                                            placeholder="選手名 ${i + 1}"
-                                        />
+                                            placeholder="選手名 ${i + 1}"/>
                                         <button onclick="removePlayer(${i})" class="text-red-400 hover:text-red-600 p-2" ${state.players.length <= 2 ? 'disabled style="opacity:0.3"' : ''}>
                                             <i data-lucide="trash-2" size="18"></i>
                                         </button>
@@ -217,6 +281,7 @@
                 const standings = calculateStandings();
                 const allFinished = state.matches.length > 0 && state.matches.every(m => m.finished);
 
+                // ★対戦カード部分のHTMLを棄権対応に修正
                 container.innerHTML = `
                     <header class="flex justify-between items-center mb-6">
                         <h1 class="text-xl font-bold text-slate-800 flex items-center gap-2">
@@ -229,7 +294,7 @@
                         </button>
                     </header>
 
-                    <!-- 順位表 -->
+                    <!-- 順位表 (変更なし) -->
                     <div class="bg-white rounded-xl shadow-md border ${state.isFinalized ? 'border-yellow-400 ring-2 ring-yellow-100' : 'border-slate-200'} overflow-hidden mb-8">
                         <div class="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
                             <h2 class="font-bold text-slate-700 text-sm flex items-center gap-2">
@@ -251,7 +316,7 @@
                                 </thead>
                                 <tbody>
                                     ${standings.map((p, i) => `
-                                        <tr class="border-b last:border-0 ${i === 0 ? 'bg-yellow-50/50' : ''}">
+                                        <tr class="border-b last:border-0 ${i === 0 && state.isFinalized ? 'bg-yellow-50' : ''}">
                                             <td class="px-3 py-3 text-center font-bold">${i + 1}</td>
                                             <td class="px-3 py-3 font-medium text-slate-800">${p.name}</td>
                                             <td class="px-3 py-3 text-center font-bold">${p.matchesWon}-${p.matchesLost}</td>
@@ -280,51 +345,73 @@
                             </div>
                             ${state.isFinalized ? '<div class="text-xs text-slate-400 flex items-center gap-1"><i data-lucide="lock" size="12"></i> 編集不可</div>' : ''}
                         </h2>
-                        ${state.matches.map((m, i) => `
-                            <div class="bg-white rounded-xl shadow-sm border p-4 transition-all ${state.isFinalized ? 'border-slate-100 opacity-80' : m.finished ? 'border-slate-200' : 'border-blue-300 ring-1 ring-blue-100'}">
+                        ${state.matches.map((m, i) => {
+                            const isForfeit = m.forfeitPlayerIndex !== null;
+                            const p1Forfeited = m.forfeitPlayerIndex === m.p1Index;
+                            const p2Forfeited = m.forfeitPlayerIndex === m.p2Index;
+                            const cardDisabled = isForfeit || state.isFinalized;
+
+                            return `
+                            <div class="bg-white rounded-xl shadow-sm border p-4 transition-all ${state.isFinalized ? 'border-slate-100 opacity-80' : m.finished ? (isForfeit ? 'border-red-200' : 'border-slate-200') : 'border-blue-300 ring-1 ring-blue-100'}">
                                 <div class="flex justify-between items-center mb-3">
                                     <div class="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">MATCH ${i + 1}</div>
+                                    ${isForfeit ? `<div class="text-xs font-bold text-red-500 bg-red-100 px-2 py-1 rounded">棄権試合</div>` : ''}
                                 </div>
-                                <div class="flex items-center justify-between gap-4">
+                                <div class="flex items-center justify-between gap-2 sm:gap-4">
                                     <div class="flex-1 text-center">
                                         <div class="font-bold text-slate-800 mb-2 truncate text-sm">${state.players[m.p1Index]}</div>
-                                        ${state.isFinalized ? `
+                                        ${p2Forfeited ? `
+                                            <div class="text-3xl font-black text-green-600 py-2">不戦勝</div>
+                                        ` : state.isFinalized ? `
                                             <div class="text-3xl font-black text-slate-800 py-2">${m.p1Sets}</div>
                                         ` : `
                                             <input type="number" value="${m.p1Sets}" placeholder="0" oninput="updateMatch('${m.id}', 'p1Sets', this.value)"
-                                                class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p1Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" />
+                                                class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p1Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" ${cardDisabled ? 'disabled' : ''}/>
                                         `}
                                         <div class="mt-2 text-[10px] text-slate-400">
-                                            点: ${state.isFinalized ? `<span class="font-bold text-slate-700">${m.p1Points || 0}</span>` : `
+                                            点: ${cardDisabled ? `<span class="font-bold text-slate-700">${m.p1Points || 0}</span>` : `
                                                 <input type="number" value="${m.p1Points}" placeholder="0" oninput="updateMatch('${m.id}', 'p1Points', this.value)"
                                                     class="w-10 text-center border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent ${m.p1Points !== "" ? "text-slate-800 font-bold" : ""}" />
                                             `}
                                         </div>
+                                        ${!state.isFinalized ? `
+                                            <button onclick="setForfeit('${m.id}', ${m.p1Index})" class="mt-3 text-xs px-2 py-1 rounded ${p1Forfeited ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-red-100 hover:text-red-600'}">
+                                                ${p1Forfeited ? '棄権取消' : '棄権'}
+                                            </button>
+                                        ` : ''}
                                     </div>
                                     <div class="text-slate-300 font-bold">vs</div>
                                     <div class="flex-1 text-center">
                                         <div class="font-bold text-slate-800 mb-2 truncate text-sm">${state.players[m.p2Index]}</div>
-                                        ${state.isFinalized ? `
+                                        ${p1Forfeited ? `
+                                            <div class="text-3xl font-black text-green-600 py-2">不戦勝</div>
+                                        ` : state.isFinalized ? `
                                             <div class="text-3xl font-black text-slate-800 py-2">${m.p2Sets}</div>
                                         ` : `
                                             <input type="number" value="${m.p2Sets}" placeholder="0" oninput="updateMatch('${m.id}', 'p2Sets', this.value)"
-                                                class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p2Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" />
+                                                class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p2Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" ${cardDisabled ? 'disabled' : ''}/>
                                         `}
                                         <div class="mt-2 text-[10px] text-slate-400">
-                                            点: ${state.isFinalized ? `<span class="font-bold text-slate-700">${m.p2Points || 0}</span>` : `
+                                            点: ${cardDisabled ? `<span class="font-bold text-slate-700">${m.p2Points || 0}</span>` : `
                                                 <input type="number" value="${m.p2Points}" placeholder="0" oninput="updateMatch('${m.id}', 'p2Points', this.value)"
                                                     class="w-10 text-center border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent ${m.p2Points !== "" ? "text-slate-800 font-bold" : ""}" />
                                             `}
                                         </div>
+                                        ${!state.isFinalized ? `
+                                            <button onclick="setForfeit('${m.id}', ${m.p2Index})" class="mt-3 text-xs px-2 py-1 rounded ${p2Forfeited ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-red-100 hover:text-red-600'}">
+                                                ${p2Forfeited ? '棄権取消' : '棄権'}
+                                            </button>
+                                        ` : ''}
                                     </div>
                                 </div>
                             </div>
-                        `).join('')}
+                        `}).join('')}
                     </div>
 
                     ${!state.isFinalized && allFinished ? `
-                        <div class="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 animate-bounce-in">
-                            <button onclick="finalizeResults()" class="w-full bg-green-600 text-white font-bold py-4 rounded-2xl shadow-2xl hover:bg-green-700 transition flex items-center justify-center gap-2 text-lg active:scale-95">
+                        <div class="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent pointer-events-none h-32"></div>
+                        <div class="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4">
+                            <button onclick="finalizeResults()" class="w-full bg-green-600 text-white font-bold py-4 rounded-2xl shadow-2xl hover:bg-green-700 transition flex items-center justify-center gap-2 text-lg active:scale-95 animate-bounce-in">
                                 <i data-lucide="send" size="20"></i> 結果を確定する
                             </button>
                         </div>
@@ -332,11 +419,9 @@
                 `;
             }
 
-            // アイコンのリロード
             lucide.createIcons();
         }
 
-        // 初期実行
         init();
     </script>
 </body>
