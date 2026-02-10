@@ -29,15 +29,14 @@
     <script>
         let state;
 
+        // --- 状態管理と永続化 ---
         function saveState() {
             localStorage.setItem('pingpongLeagueState', JSON.stringify(state));
         }
 
         function loadState() {
             const savedState = localStorage.getItem('pingpongLeagueState');
-            if (savedState) {
-                return JSON.parse(savedState);
-            }
+            if (savedState) { return JSON.parse(savedState); }
             return {
                 players: ["選手A", "選手B", "選手C", "選手D"],
                 isSetup: true,
@@ -78,15 +77,9 @@
             for (let i = 0; i < state.players.length; i++) {
                 for (let j = i + 1; j < state.players.length; j++) {
                     state.matches.push({
-                        id: `${i}-${j}`,
-                        p1Index: i,
-                        p2Index: j,
-                        p1Sets: "",
-                        p2Sets: "",
-                        p1Points: "",
-                        p2Points: "",
-                        finished: false,
-                        forfeitPlayerIndex: null
+                        id: `${i}-${j}`, p1Index: i, p2Index: j,
+                        p1Sets: "", p2Sets: "", p1Points: "", p2Points: "",
+                        finished: false, forfeitPlayerIndex: null
                     });
                 }
             }
@@ -96,36 +89,31 @@
             render();
         }
 
-        function updateMatch(matchId, field, value) {
+        // ★ ゲーム数(Sets)の更新用関数 (onchangeで呼び出し、再レンダリングを行う)
+        function updateMatchSets(matchId, field, value) {
             if (state.isFinalized) return;
             const match = state.matches.find(m => m.id === matchId);
             if (!match) return;
 
-            let updatedValue = value === "" ? "" : Math.max(0, parseInt(value) || 0);
-            match[field] = updatedValue;
-            
-            if (field === 'p1Sets' || field === 'p2Sets') {
-                match.forfeitPlayerIndex = null; // スコア入力時は棄権を解除
-                match.finished = (match.p1Sets !== "" && match.p2Sets !== "");
-            }
+            match[field] = value === "" ? "" : Math.max(0, parseInt(value) || 0);
+            match.forfeitPlayerIndex = null;
+            match.finished = (match.p1Sets !== "" && match.p2Sets !== "");
             
             saveState();
-            render();
+            render(); // UI全体を更新
         }
-        
+
+        // ★ 得点(Points)の更新用関数 (oninputで呼び出し、再レンダリングしない)
         function updateMatchPoints(matchId, field, value) {
             if (state.isFinalized) return;
             const match = state.matches.find(m => m.id === matchId);
             if (!match) return;
             
-            let updatedValue = value === "" ? "" : Math.max(0, parseInt(value) || 0);
-            match[field] = updatedValue;
-            match.forfeitPlayerIndex = null; // スコア入力時は棄権を解除
+            match[field] = value === "" ? "" : Math.max(0, parseInt(value) || 0);
+            match.forfeitPlayerIndex = null;
             
-            saveState();
-            // ポイント入力では再レンダリングしない
+            saveState(); // データのみ保存し、UIは更新しない
         }
-
 
         function setForfeit(matchId, playerIndex) {
             if (state.isFinalized) return;
@@ -234,7 +222,6 @@
             const container = document.getElementById('app');
             
             if (state.isSetup) {
-                // ★ oninput を onchange に変更
                 container.innerHTML = `
                     <div class="max-w-md mx-auto pt-10">
                         <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
@@ -269,7 +256,6 @@
                 const standings = calculateStandings();
                 const allFinished = state.matches.length > 0 && state.matches.every(m => m.finished);
 
-                // ★ oninput を onchange に変更
                 container.innerHTML = `
                     <header class="flex justify-between items-center mb-6">
                         <h1 class="text-xl font-bold text-slate-800 flex items-center gap-2">
@@ -282,17 +268,50 @@
                         </button>
                     </header>
 
-                    <!-- 順位表 (変更なし) -->
+                    <!-- 順位表 -->
                     <div class="bg-white rounded-xl shadow-md border ${state.isFinalized ? 'border-yellow-400 ring-2 ring-yellow-100' : 'border-slate-200'} overflow-hidden mb-8">
                         <div class="overflow-x-auto">
                             <table class="w-full text-sm text-left">
-                                <!-- thead, tbody は変更ないので省略 -->
+                                <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b">
+                                    <tr>
+                                        <th class="px-3 py-3 w-10 text-center">#</th>
+                                        <th class="px-3 py-3">名前</th>
+                                        <th class="px-3 py-3 text-center">勝-負</th>
+                                        <th class="px-3 py-3 text-center">ゲーム率</th>
+                                        <th class="px-3 py-3 text-center">ポイント率</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${standings.map((p, i) => `
+                                        <tr class="border-b last:border-0 ${i === 0 && state.isFinalized ? 'bg-yellow-50' : ''}">
+                                            <td class="px-3 py-3 text-center font-bold">${i + 1}</td>
+                                            <td class="px-3 py-3 font-medium text-slate-800">${p.name}</td>
+                                            <td class="px-3 py-3 text-center font-bold">${p.matchesWon}-${p.matchesLost}</td>
+                                            <td class="px-3 py-3 text-center text-xs">
+                                                <div class="font-semibold">${p.setsWon}-${p.setsLost}</div>
+                                                <div class="text-slate-400">${p.setRatio.toFixed(3)}</div>
+                                            </td>
+                                            <td class="px-3 py-3 text-center text-xs">
+                                                <div class="font-semibold">${p.pointsWon}-${p.pointsLost}</div>
+                                                <div class="text-slate-400">${p.pointRatio.toFixed(3)}</div>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
                             </table>
                         </div>
                     </div>
 
                     <div class="space-y-4">
-                        <!-- 対戦カードヘッダー (変更なし) -->
+                        <h2 class="font-bold text-slate-700 px-1 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span>対戦カード</span>
+                                <span class="text-xs font-normal text-slate-400 bg-slate-200 px-2 py-0.5 rounded-full">
+                                    ${state.matches.filter(m => m.finished).length} / ${state.matches.length}
+                                </span>
+                            </div>
+                            ${state.isFinalized ? '<div class="text-xs text-slate-400 flex items-center gap-1"><i data-lucide="lock" size="12"></i> 編集不可</div>' : ''}
+                        </h2>
                         ${state.matches.map((m, i) => {
                             const isForfeit = m.forfeitPlayerIndex !== null;
                             const p1Forfeited = m.forfeitPlayerIndex === m.p1Index;
@@ -309,12 +328,12 @@
                                     <div class="flex-1 text-center">
                                         <div class="font-bold text-slate-800 mb-2 truncate text-sm">${state.players[m.p1Index]}</div>
                                         ${p2Forfeited ? `<div class="text-3xl font-black text-green-600 py-2">不戦勝</div>` : state.isFinalized ? `<div class="text-3xl font-black text-slate-800 py-2">${m.p1Sets}</div>` : `
-                                            <input type="number" value="${m.p1Sets}" placeholder="0" onchange="updateMatch('${m.id}', 'p1Sets', this.value)"
+                                            <input type="number" value="${m.p1Sets}" placeholder="0" onchange="updateMatchSets('${m.id}', 'p1Sets', this.value)"
                                                 class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p1Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" ${cardDisabled ? 'disabled' : ''}/>
                                         `}
                                         <div class="mt-2 text-[10px] text-slate-400">
                                             点: ${cardDisabled ? `<span class="font-bold text-slate-700">${m.p1Points || 0}</span>` : `
-                                                <input type="number" value="${m.p1Points}" placeholder="0" onchange="updateMatch('${m.id}', 'p1Points', this.value)"
+                                                <input type="number" value="${m.p1Points}" placeholder="0" oninput="updateMatchPoints('${m.id}', 'p1Points', this.value)"
                                                     class="w-10 text-center border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent ${m.p1Points !== "" ? "text-slate-800 font-bold" : ""}" />
                                             `}
                                         </div>
@@ -324,12 +343,12 @@
                                     <div class="flex-1 text-center">
                                         <div class="font-bold text-slate-800 mb-2 truncate text-sm">${state.players[m.p2Index]}</div>
                                         ${p1Forfeited ? `<div class="text-3xl font-black text-green-600 py-2">不戦勝</div>` : state.isFinalized ? `<div class="text-3xl font-black text-slate-800 py-2">${m.p2Sets}</div>` : `
-                                            <input type="number" value="${m.p2Sets}" placeholder="0" onchange="updateMatch('${m.id}', 'p2Sets', this.value)"
+                                            <input type="number" value="${m.p2Sets}" placeholder="0" onchange="updateMatchSets('${m.id}', 'p2Sets', this.value)"
                                                 class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p2Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" ${cardDisabled ? 'disabled' : ''}/>
                                         `}
                                         <div class="mt-2 text-[10px] text-slate-400">
                                             点: ${cardDisabled ? `<span class="font-bold text-slate-700">${m.p2Points || 0}</span>` : `
-                                                <input type="number" value="${m.p2Points}" placeholder="0" onchange="updateMatch('${m.id}', 'p2Points', this.value)"
+                                                <input type="number" value="${m.p2Points}" placeholder="0" oninput="updateMatchPoints('${m.id}', 'p2Points', this.value)"
                                                     class="w-10 text-center border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent ${m.p2Points !== "" ? "text-slate-800 font-bold" : ""}" />
                                             `}
                                         </div>
@@ -340,36 +359,14 @@
                         `}).join('')}
                     </div>
 
-                    <!-- 結果確定ボタン (変更なし) -->
-                `;
-                // 順位表の再描画（省略した部分をここで埋める）
-                document.querySelector('.bg-white.rounded-xl.shadow-md.border .overflow-x-auto table').innerHTML = `
-                    <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b">
-                        <tr>
-                            <th class="px-3 py-3 w-10 text-center">#</th>
-                            <th class="px-3 py-3">名前</th>
-                            <th class="px-3 py-3 text-center">勝-負</th>
-                            <th class="px-3 py-3 text-center">ゲーム率</th>
-                            <th class="px-3 py-3 text-center">ポイント率</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${standings.map((p, i) => `
-                            <tr class="border-b last:border-0 ${i === 0 && state.isFinalized ? 'bg-yellow-50' : ''}">
-                                <td class="px-3 py-3 text-center font-bold">${i + 1}</td>
-                                <td class="px-3 py-3 font-medium text-slate-800">${p.name}</td>
-                                <td class="px-3 py-3 text-center font-bold">${p.matchesWon}-${p.matchesLost}</td>
-                                <td class="px-3 py-3 text-center text-xs">
-                                    <div class="font-semibold">${p.setsWon}-${p.setsLost}</div>
-                                    <div class="text-slate-400">${p.setRatio.toFixed(3)}</div>
-                                </td>
-                                <td class="px-3 py-3 text-center text-xs">
-                                    <div class="font-semibold">${p.pointsWon}-${p.pointsLost}</div>
-                                    <div class="text-slate-400">${p.pointRatio.toFixed(3)}</div>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
+                    ${!state.isFinalized && allFinished ? `
+                        <div class="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent pointer-events-none h-32"></div>
+                        <div class="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4">
+                            <button onclick="finalizeResults()" class="w-full bg-green-600 text-white font-bold py-4 rounded-2xl shadow-2xl hover:bg-green-700 transition flex items-center justify-center gap-2 text-lg active:scale-95 animate-bounce-in">
+                                <i data-lucide="send" size="20"></i> 結果を確定する
+                            </button>
+                        </div>
+                    ` : ''}
                 `;
             }
 
