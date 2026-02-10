@@ -89,28 +89,27 @@
             render();
         }
 
-        // ★ ゲーム数(Sets)の更新用関数 (onchangeで呼び出し、再レンダリングを行う)
-        function updateMatchSets(matchId, field, value) {
+        // ★★★ 汎用的なスコア更新関数に統合 ★★★
+        // ゲーム数・得点どちらもこの関数を oninput で呼び出す
+        function updateMatchScore(matchId, field, value) {
             if (state.isFinalized) return;
             const match = state.matches.find(m => m.id === matchId);
             if (!match) return;
 
             match[field] = value === "" ? "" : Math.max(0, parseInt(value) || 0);
-            match.forfeitPlayerIndex = null;
-            match.finished = (match.p1Sets !== "" && match.p2Sets !== "");
-            
-            saveState();
-            render(); // UI全体を更新
-        }
+            match.forfeitPlayerIndex = null; // スコア入力があったら棄権は解除
 
-        // ★ 得点(Points)の更新用関数 (oninputで呼び出し、再レンダリングしない)
-        function updateMatchPoints(matchId, field, value) {
-            if (state.isFinalized) return;
-            const match = state.matches.find(m => m.id === matchId);
-            if (!match) return;
-            
-            match[field] = value === "" ? "" : Math.max(0, parseInt(value) || 0);
-            match.forfeitPlayerIndex = null;
+            // ゲーム数が入力された場合のみ、完了状態を判定
+            if (field === 'p1Sets' || field === 'p2Sets') {
+                const wasFinished = match.finished;
+                match.finished = (match.p1Sets !== "" && match.p2Sets !== "");
+                // 完了状態が変化した場合のみ再描画
+                if (wasFinished !== match.finished) {
+                    saveState();
+                    render();
+                    return;
+                }
+            }
             
             saveState(); // データのみ保存し、UIは更新しない
         }
@@ -222,6 +221,7 @@
             const container = document.getElementById('app');
             
             if (state.isSetup) {
+                // (セットアップ画面は変更なし)
                 container.innerHTML = `
                     <div class="max-w-md mx-auto pt-10">
                         <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
@@ -328,12 +328,12 @@
                                     <div class="flex-1 text-center">
                                         <div class="font-bold text-slate-800 mb-2 truncate text-sm">${state.players[m.p1Index]}</div>
                                         ${p2Forfeited ? `<div class="text-3xl font-black text-green-600 py-2">不戦勝</div>` : state.isFinalized ? `<div class="text-3xl font-black text-slate-800 py-2">${m.p1Sets}</div>` : `
-                                            <input type="number" value="${m.p1Sets}" placeholder="0" onchange="updateMatchSets('${m.id}', 'p1Sets', this.value)"
+                                            <input type="number" value="${m.p1Sets}" placeholder="0" oninput="updateMatchScore('${m.id}', 'p1Sets', this.value)"
                                                 class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p1Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" ${cardDisabled ? 'disabled' : ''}/>
                                         `}
                                         <div class="mt-2 text-[10px] text-slate-400">
                                             点: ${cardDisabled ? `<span class="font-bold text-slate-700">${m.p1Points || 0}</span>` : `
-                                                <input type="number" value="${m.p1Points}" placeholder="0" oninput="updateMatchPoints('${m.id}', 'p1Points', this.value)"
+                                                <input type="number" value="${m.p1Points}" placeholder="0" oninput="updateMatchScore('${m.id}', 'p1Points', this.value)"
                                                     class="w-10 text-center border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent ${m.p1Points !== "" ? "text-slate-800 font-bold" : ""}" />
                                             `}
                                         </div>
@@ -343,12 +343,12 @@
                                     <div class="flex-1 text-center">
                                         <div class="font-bold text-slate-800 mb-2 truncate text-sm">${state.players[m.p2Index]}</div>
                                         ${p1Forfeited ? `<div class="text-3xl font-black text-green-600 py-2">不戦勝</div>` : state.isFinalized ? `<div class="text-3xl font-black text-slate-800 py-2">${m.p2Sets}</div>` : `
-                                            <input type="number" value="${m.p2Sets}" placeholder="0" onchange="updateMatchSets('${m.id}', 'p2Sets', this.value)"
+                                            <input type="number" value="${m.p2Sets}" placeholder="0" oninput="updateMatchScore('${m.id}', 'p2Sets', this.value)"
                                                 class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p2Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" ${cardDisabled ? 'disabled' : ''}/>
                                         `}
                                         <div class="mt-2 text-[10px] text-slate-400">
                                             点: ${cardDisabled ? `<span class="font-bold text-slate-700">${m.p2Points || 0}</span>` : `
-                                                <input type="number" value="${m.p2Points}" placeholder="0" oninput="updateMatchPoints('${m.id}', 'p2Points', this.value)"
+                                                <input type="number" value="${m.p2Points}" placeholder="0" oninput="updateMatchScore('${m.id}', 'p2Points', this.value)"
                                                     class="w-10 text-center border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent ${m.p2Points !== "" ? "text-slate-800 font-bold" : ""}" />
                                             `}
                                         </div>
