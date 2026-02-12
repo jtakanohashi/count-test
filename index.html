@@ -6,8 +6,6 @@
     <title>卓球リーグ戦マネージャー</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- nanomorphライブラリを読み込み -->
-    <script src="https://cdn.jsdelivr.net/npm/nanomorph@5.5.0/dist/nanomorph.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap' );
         body { font-family: 'Inter', sans-serif; }
@@ -31,7 +29,7 @@
     <script>
         let state;
 
-        // --- 状態管理と永続化 (変更なし) ---
+        // --- 状態管理と永続化 ---
         function saveState() { localStorage.setItem('pingpongLeagueState', JSON.stringify(state)); }
         function loadState() {
             const savedState = localStorage.getItem('pingpongLeagueState');
@@ -44,7 +42,7 @@
             render();
         }
 
-        // --- アクション (変更なし) ---
+        // --- アクション ---
         function addPlayer() { state.players.push(`選手${state.players.length + 1}`); saveState(); render(); }
         function removePlayer(index) { if (state.players.length > 2) { state.players.splice(index, 1); saveState(); render(); } }
         function updatePlayerName(index, name) { state.players[index] = name; saveState(); }
@@ -58,19 +56,27 @@
             }
             state.isSetup = false; state.isFinalized = false; saveState(); render();
         }
-        function updateMatchScore(matchId, field, value) {
+
+        // ★★★ onchangeで呼び出す汎用更新関数 ★★★
+        function updateMatchValue(matchId, field, value) {
             if (state.isFinalized) return;
             const match = state.matches.find(m => m.id === matchId);
             if (!match) return;
+
             match[field] = value === "" ? "" : Math.max(0, parseInt(value) || 0);
             match.forfeitPlayerIndex = null;
-            if (field === 'p1Sets' || field === 'p2Sets') {
-                const wasFinished = match.finished;
-                match.finished = (match.p1Sets !== "" && match.p2Sets !== "");
-                if (wasFinished !== match.finished) { saveState(); render(); return; }
-            }
+
+            const wasFinished = match.finished;
+            match.finished = (match.p1Sets !== "" && match.p2Sets !== "");
+
             saveState();
+
+            // 完了状態が変化した時だけ、スクロール位置を復元しつつ再描画
+            if (wasFinished !== match.finished) {
+                render(true); // 'true'を渡してスクロール復元を指示
+            }
         }
+
         function setForfeit(matchId, playerIndex) {
             if (state.isFinalized) return;
             const match = state.matches.find(m => m.id === matchId);
@@ -81,8 +87,9 @@
                 match.forfeitPlayerIndex = playerIndex; match.finished = true;
                 match.p1Sets = ""; match.p2Sets = ""; match.p1Points = ""; match.p2Points = "";
             }
-            saveState(); render();
+            saveState(); render(true);
         }
+
         function finalizeResults() { state.isFinalized = true; saveState(); render(); }
         function resetApp() { localStorage.removeItem('pingpongLeagueState'); state = loadState(); render(); }
 
@@ -148,86 +155,85 @@
             });
         }
 
-        // ★★★ nanomorph の使い方を修正 ★★★
-        function render() {
-            const currentApp = document.getElementById('app');
+        // ★★★ シンプルなinnerHTML方式に戻し、スクロール復元機能を追加 ★★★
+        function render(preserveScroll = false) {
+            const app = document.getElementById('app');
+            let scrollY = 0;
             
-            // 1. 新しいHTML文字列を生成する
-            const newHTML = getHTMLForState();
+            // スクロール位置を保持する指示がある場合のみ、位置を記憶
+            if (preserveScroll) {
+                scrollY = window.scrollY;
+            }
 
-            // 2. 新しいHTML文字列から、比較対象となる新しいDOMノードを作成する
-            //    テンプレートタグを使うと、余計な<div>で囲まずに中身だけを効率的にパースできる
-            const template = document.createElement('template');
-            template.innerHTML = newHTML.trim();
-            const newApp = template.content.firstChild;
-
-            // 3. nanomorphを使って、現在のDOM(currentApp)と新しいDOM(newApp)の差分を適用
-            nanomorph(currentApp, newApp);
-
-            // 4. アイコンを再描画
+            app.innerHTML = getHTMLForState();
             lucide.createIcons();
+
+            // スクロール位置を復元
+            if (preserveScroll) {
+                // setTimeoutでブラウザの描画完了を待ってからスクロールを実行
+                setTimeout(() => {
+                    window.scrollTo(0, scrollY);
+                }, 0);
+            }
         }
 
-        // ★★★ HTML生成ロジックを独立した関数に分離 ★★★
+        // ★★★ HTML生成ロジックを独立した関数に分離 (変更なし) ★★★
         function getHTMLForState() {
             if (state.isSetup) {
                 return `
-                    <div id="app" class="max-w-2xl mx-auto p-4 pb-32">
-                        <div class="max-w-md mx-auto pt-10">
-                            <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
-                                <h1 class="text-2xl font-bold text-slate-800 mb-2 text-center flex items-center justify-center gap-2"><i data-lucide="trophy" class="text-yellow-500"></i>卓球リーグ戦作成</h1>
-                                <p class="text-slate-500 text-sm mb-6 text-center">同率の場合は当該選手間の成績で順位を決定します。</p>
-                                <div class="space-y-3 mb-6">
-                                    ${state.players.map((p, i) => `<div class="flex gap-2 items-center"><span class="w-6 text-slate-400 font-bold">${i + 1}.</span><input type="text" value="${p}" onchange="updatePlayerName(${i}, this.value)" class="flex-1 border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="選手名 ${i + 1}"/><button onclick="removePlayer(${i})" class="text-red-400 hover:text-red-600 p-2" ${state.players.length <= 2 ? 'disabled style="opacity:0.3"' : ''}><i data-lucide="trash-2" size="18"></i></button></div>`).join('')}
-                                </div>
-                                <button onclick="addPlayer()" class="w-full py-2 mb-4 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 font-medium transition flex items-center justify-center gap-2"><i data-lucide="plus" size="18"></i> 選手を追加</button>
-                                <button onclick="startLeague()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-blue-700 transition transform active:scale-95">リーグ戦を始める</button>
+                    <div class="max-w-md mx-auto pt-10">
+                        <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
+                            <h1 class="text-2xl font-bold text-slate-800 mb-2 text-center flex items-center justify-center gap-2"><i data-lucide="trophy" class="text-yellow-500"></i>卓球リーグ戦作成</h1>
+                            <p class="text-slate-500 text-sm mb-6 text-center">同率の場合は当該選手間の成績で順位を決定します。</p>
+                            <div class="space-y-3 mb-6">
+                                ${state.players.map((p, i) => `<div class="flex gap-2 items-center"><span class="w-6 text-slate-400 font-bold">${i + 1}.</span><input type="text" value="${p}" onchange="updatePlayerName(${i}, this.value)" class="flex-1 border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="選手名 ${i + 1}"/><button onclick="removePlayer(${i})" class="text-red-400 hover:text-red-600 p-2" ${state.players.length <= 2 ? 'disabled style="opacity:0.3"' : ''}><i data-lucide="trash-2" size="18"></i></button></div>`).join('')}
                             </div>
+                            <button onclick="addPlayer()" class="w-full py-2 mb-4 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 font-medium transition flex items-center justify-center gap-2"><i data-lucide="plus" size="18"></i> 選手を追加</button>
+                            <button onclick="startLeague()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-blue-700 transition transform active:scale-95">リーグ戦を始める</button>
                         </div>
                     </div>`;
             } else {
                 const standings = calculateStandings();
                 const allFinished = state.matches.length > 0 && state.matches.every(m => m.finished);
                 return `
-                    <div id="app" class="max-w-2xl mx-auto p-4 pb-32">
-                        <header class="flex justify-between items-center mb-6">
-                            <h1 class="text-xl font-bold text-slate-800 flex items-center gap-2"><i data-lucide="trophy" class="text-yellow-500"></i>${state.isFinalized ? "最終結果" : "進行中"}</h1>
-                            <button onclick="resetApp()" class="text-xs text-slate-500 bg-white px-3 py-2 rounded border hover:bg-slate-50 flex items-center gap-1 shadow-sm"><i data-lucide="rotate-ccw" size="14"></i>${state.isFinalized ? "新しく始める" : "リセット"}</button>
-                        </header>
-                        <div class="bg-white rounded-xl shadow-md border ${state.isFinalized ? 'border-yellow-400 ring-2 ring-yellow-100' : 'border-slate-200'} overflow-hidden mb-8">
-                            <div class="overflow-x-auto">
-                                <table class="w-full text-sm text-left">
-                                    <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b"><tr><th class="px-3 py-3 w-10 text-center">#</th><th class="px-3 py-3">名前</th><th class="px-3 py-3 text-center">勝-負</th><th class="px-3 py-3 text-center">ゲーム率</th><th class="px-3 py-3 text-center">ポイント率</th></tr></thead>
-                                    <tbody>${standings.map((p, i) => `<tr class="border-b last:border-0 ${i === 0 && state.isFinalized ? 'bg-yellow-50' : ''}"><td class="px-3 py-3 text-center font-bold">${i + 1}</td><td class="px-3 py-3 font-medium text-slate-800">${p.name}</td><td class="px-3 py-3 text-center font-bold">${p.matchesWon}-${p.matchesLost}</td><td class="px-3 py-3 text-center text-xs"><div class="font-semibold">${p.setsWon}-${p.setsLost}</div><div class="text-slate-400">${p.setRatio.toFixed(3)}</div></td><td class="px-3 py-3 text-center text-xs"><div class="font-semibold">${p.pointsWon}-${p.pointsLost}</div><div class="text-slate-400">${p.pointRatio.toFixed(3)}</div></td></tr>`).join('')}</tbody>
-                                </table>
-                            </div>
+                    <header class="flex justify-between items-center mb-6">
+                        <h1 class="text-xl font-bold text-slate-800 flex items-center gap-2"><i data-lucide="trophy" class="text-yellow-500"></i>${state.isFinalized ? "最終結果" : "進行中"}</h1>
+                        <button onclick="resetApp()" class="text-xs text-slate-500 bg-white px-3 py-2 rounded border hover:bg-slate-50 flex items-center gap-1 shadow-sm"><i data-lucide="rotate-ccw" size="14"></i>${state.isFinalized ? "新しく始める" : "リセット"}</button>
+                    </header>
+                    <div class="bg-white rounded-xl shadow-md border ${state.isFinalized ? 'border-yellow-400 ring-2 ring-yellow-100' : 'border-slate-200'} overflow-hidden mb-8">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left">
+                                <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b"><tr><th class="px-3 py-3 w-10 text-center">#</th><th class="px-3 py-3">名前</th><th class="px-3 py-3 text-center">勝-負</th><th class="px-3 py-3 text-center">ゲーム率</th><th class="px-3 py-3 text-center">ポイント率</th></tr></thead>
+                                <tbody>${standings.map((p, i) => `<tr class="border-b last:border-0 ${i === 0 && state.isFinalized ? 'bg-yellow-50' : ''}"><td class="px-3 py-3 text-center font-bold">${i + 1}</td><td class="px-3 py-3 font-medium text-slate-800">${p.name}</td><td class="px-3 py-3 text-center font-bold">${p.matchesWon}-${p.matchesLost}</td><td class="px-3 py-3 text-center text-xs"><div class="font-semibold">${p.setsWon}-${p.setsLost}</div><div class="text-slate-400">${p.setRatio.toFixed(3)}</div></td><td class="px-3 py-3 text-center text-xs"><div class="font-semibold">${p.pointsWon}-${p.pointsLost}</div><div class="text-slate-400">${p.pointRatio.toFixed(3)}</div></td></tr>`).join('')}</tbody>
+                            </table>
                         </div>
-                        <div class="space-y-4">
-                            <h2 class="font-bold text-slate-700 px-1 flex items-center justify-between"><div class="flex items-center gap-2"><span>対戦カード</span><span class="text-xs font-normal text-slate-400 bg-slate-200 px-2 py-0.5 rounded-full">${state.matches.filter(m => m.finished).length} / ${state.matches.length}</span></div>${state.isFinalized ? '<div class="text-xs text-slate-400 flex items-center gap-1"><i data-lucide="lock" size="12"></i> 編集不可</div>' : ''}</h2>
-                            ${state.matches.map((m, i) => {
-                                const isForfeit = m.forfeitPlayerIndex !== null, p1Forfeited = m.forfeitPlayerIndex === m.p1Index, p2Forfeited = m.forfeitPlayerIndex === m.p2Index, cardDisabled = isForfeit || state.isFinalized;
-                                return `<div class="bg-white rounded-xl shadow-sm border p-4 transition-all ${state.isFinalized ? 'border-slate-100 opacity-80' : m.finished ? (isForfeit ? 'border-red-200' : 'border-slate-200') : 'border-blue-300 ring-1 ring-blue-100'}">
-                                    <div class="flex justify-between items-center mb-3"><div class="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">MATCH ${i + 1}</div>${isForfeit ? `<div class="text-xs font-bold text-red-500 bg-red-100 px-2 py-1 rounded">棄権試合</div>` : ''}</div>
-                                    <div class="flex items-center justify-between gap-2 sm:gap-4">
-                                        <div class="flex-1 text-center">
-                                            <div class="font-bold text-slate-800 mb-2 truncate text-sm">${state.players[m.p1Index]}</div>
-                                            ${p2Forfeited ? `<div class="text-3xl font-black text-green-600 py-2">不戦勝</div>` : state.isFinalized ? `<div class="text-3xl font-black text-slate-800 py-2">${m.p1Sets}</div>` : `<input type="number" value="${m.p1Sets}" placeholder="0" oninput="updateMatchScore('${m.id}', 'p1Sets', this.value)" class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p1Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" ${cardDisabled ? 'disabled' : ''}/>`}
-                                            <div class="mt-2 text-[10px] text-slate-400">点: ${cardDisabled ? `<span class="font-bold text-slate-700">${m.p1Points || 0}</span>` : `<input type="number" value="${m.p1Points}" placeholder="0" oninput="updateMatchScore('${m.id}', 'p1Points', this.value)" class="w-10 text-center border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent ${m.p1Points !== "" ? "text-slate-800 font-bold" : ""}" />`}</div>
-                                            ${!state.isFinalized ? `<button onclick="setForfeit('${m.id}', ${m.p1Index})" class="mt-3 text-xs px-2 py-1 rounded ${p1Forfeited ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-red-100 hover:text-red-600'}">${p1Forfeited ? '棄権取消' : '棄権'}</button>` : ''}
-                                        </div>
-                                        <div class="text-slate-300 font-bold">vs</div>
-                                        <div class="flex-1 text-center">
-                                            <div class="font-bold text-slate-800 mb-2 truncate text-sm">${state.players[m.p2Index]}</div>
-                                            ${p1Forfeited ? `<div class="text-3xl font-black text-green-600 py-2">不戦勝</div>` : state.isFinalized ? `<div class="text-3xl font-black text-slate-800 py-2">${m.p2Sets}</div>` : `<input type="number" value="${m.p2Sets}" placeholder="0" oninput="updateMatchScore('${m.id}', 'p2Sets', this.value)" class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p2Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" ${cardDisabled ? 'disabled' : ''}/>`}
-                                            <div class="mt-2 text-[10px] text-slate-400">点: ${cardDisabled ? `<span class="font-bold text-slate-700">${m.p2Points || 0}</span>` : `<input type="number" value="${m.p2Points}" placeholder="0" oninput="updateMatchScore('${m.id}', 'p2Points', this.value)" class="w-10 text-center border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent ${m.p2Points !== "" ? "text-slate-800 font-bold" : ""}" />`}</div>
-                                            ${!state.isFinalized ? `<button onclick="setForfeit('${m.id}', ${m.p2Index})" class="mt-3 text-xs px-2 py-1 rounded ${p2Forfeited ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-red-100 hover:text-red-600'}">${p2Forfeited ? '棄権取消' : '棄権'}</button>` : ''}
-                                        </div>
+                    </div>
+                    <div class="space-y-4">
+                        <h2 class="font-bold text-slate-700 px-1 flex items-center justify-between"><div class="flex items-center gap-2"><span>対戦カード</span><span class="text-xs font-normal text-slate-400 bg-slate-200 px-2 py-0.5 rounded-full">${state.matches.filter(m => m.finished).length} / ${state.matches.length}</span></div>${state.isFinalized ? '<div class="text-xs text-slate-400 flex items-center gap-1"><i data-lucide="lock" size="12"></i> 編集不可</div>' : ''}</h2>
+                        ${state.matches.map((m, i) => {
+                            const isForfeit = m.forfeitPlayerIndex !== null, p1Forfeited = m.forfeitPlayerIndex === m.p1Index, p2Forfeited = m.forfeitPlayerIndex === m.p2Index, cardDisabled = isForfeit || state.isFinalized;
+                            return `<div class="bg-white rounded-xl shadow-sm border p-4 transition-all ${state.isFinalized ? 'border-slate-100 opacity-80' : m.finished ? (isForfeit ? 'border-red-200' : 'border-slate-200') : 'border-blue-300 ring-1 ring-blue-100'}">
+                                <div class="flex justify-between items-center mb-3"><div class="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">MATCH ${i + 1}</div>${isForfeit ? `<div class="text-xs font-bold text-red-500 bg-red-100 px-2 py-1 rounded">棄権試合</div>` : ''}</div>
+                                <div class="flex items-center justify-between gap-2 sm:gap-4">
+                                    <div class="flex-1 text-center">
+                                        <div class="font-bold text-slate-800 mb-2 truncate text-sm">${state.players[m.p1Index]}</div>
+                                        ${p2Forfeited ? `<div class="text-3xl font-black text-green-600 py-2">不戦勝</div>` : state.isFinalized ? `<div class="text-3xl font-black text-slate-800 py-2">${m.p1Sets}</div>` : `<input type="number" value="${m.p1Sets}" placeholder="0" onchange="updateMatchValue('${m.id}', 'p1Sets', this.value)" class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p1Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" ${cardDisabled ? 'disabled' : ''}/>`}
+                                        <div class="mt-2 text-[10px] text-slate-400">点: ${cardDisabled ? `<span class="font-bold text-slate-700">${m.p1Points || 0}</span>` : `<input type="number" value="${m.p1Points}" placeholder="0" onchange="updateMatchValue('${m.id}', 'p1Points', this.value)" class="w-10 text-center border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent ${m.p1Points !== "" ? "text-slate-800 font-bold" : ""}" />`}</div>
+                                        ${!state.isFinalized ? `<button onclick="setForfeit('${m.id}', ${m.p1Index})" class="mt-3 text-xs px-2 py-1 rounded ${p1Forfeited ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-red-100 hover:text-red-600'}">${p1Forfeited ? '棄権取消' : '棄権'}</button>` : ''}
                                     </div>
-                                </div>`;
-                            }).join('')}
-                        </div>
-                        ${!state.isFinalized && allFinished ? `<div class="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent pointer-events-none h-32"></div><div class="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4"><button onclick="finalizeResults()" class="w-full bg-green-600 text-white font-bold py-4 rounded-2xl shadow-2xl hover:bg-green-700 transition flex items-center justify-center gap-2 text-lg active:scale-95 animate-bounce-in"><i data-lucide="send" size="20"></i> 結果を確定する</button></div>` : ''}
-                    </div>`;
+                                    <div class="text-slate-300 font-bold">vs</div>
+                                    <div class="flex-1 text-center">
+                                        <div class="font-bold text-slate-800 mb-2 truncate text-sm">${state.players[m.p2Index]}</div>
+                                        ${p1Forfeited ? `<div class="text-3xl font-black text-green-600 py-2">不戦勝</div>` : state.isFinalized ? `<div class="text-3xl font-black text-slate-800 py-2">${m.p2Sets}</div>` : `<input type="number" value="${m.p2Sets}" placeholder="0" onchange="updateMatchValue('${m.id}', 'p2Sets', this.value)" class="w-14 h-12 text-center text-2xl font-bold border rounded-lg outline-none transition-all ${m.p2Sets !== "" ? "bg-white border-blue-500 text-slate-800 shadow-sm" : "bg-slate-50 border-slate-200 text-slate-400"}" ${cardDisabled ? 'disabled' : ''}/>`}
+                                        <div class="mt-2 text-[10px] text-slate-400">点: ${cardDisabled ? `<span class="font-bold text-slate-700">${m.p2Points || 0}</span>` : `<input type="number" value="${m.p2Points}" placeholder="0" onchange="updateMatchValue('${m.id}', 'p2Points', this.value)" class="w-10 text-center border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent ${m.p2Points !== "" ? "text-slate-800 font-bold" : ""}" />`}</div>
+                                        ${!state.isFinalized ? `<button onclick="setForfeit('${m.id}', ${m.p2Index})" class="mt-3 text-xs px-2 py-1 rounded ${p2Forfeited ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-red-100 hover:text-red-600'}">${p2Forfeited ? '棄権取消' : '棄権'}</button>` : ''}
+                                    </div>
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                    ${!state.isFinalized && allFinished ? `<div class="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent pointer-events-none h-32"></div><div class="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4"><button onclick="finalizeResults()" class="w-full bg-green-600 text-white font-bold py-4 rounded-2xl shadow-2xl hover:bg-green-700 transition flex items-center justify-center gap-2 text-lg active:scale-95 animate-bounce-in"><i data-lucide="send" size="20"></i> 結果を確定する</button></div>` : ''}
+                `;
             }
         }
 
